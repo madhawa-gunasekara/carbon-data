@@ -1,0 +1,318 @@
+/*
+ * Copyright (c) 2015, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.wso2.carbon.dataservices.core.description.query;
+
+import org.wso2.carbon.dataservices.common.DBConstants;
+import org.wso2.carbon.dataservices.core.description.event.EventTrigger;
+import org.wso2.carbon.dataservices.core.engine.DataService;
+import org.wso2.carbon.dataservices.core.engine.QueryParam;
+import org.wso2.carbon.dataservices.core.engine.Result;
+import org.wso2.carbon.dataservices.core.engine.InternalParam;
+import org.wso2.carbon.dataservices.core.engine.ParamValue;
+import org.wso2.carbon.dataservices.core.engine.InternalParamCollection;
+
+import java.util.List;
+import java.util.Map;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Set;
+import java.util.HashMap;
+import java.util.HashSet;
+
+/**
+ *
+ */
+public abstract class QueryExpression extends Query {
+
+	/**
+	 *
+	 */
+	protected String query;
+
+	/**
+	 *
+	 */
+	protected List<String> namedParamNames;
+
+	/**
+	 *
+	 */
+	protected int paramCount;
+
+	public QueryExpression(DataService dataService, String queryId, String query,
+	                       List<QueryParam> queryParams, Result result, String configId,
+	                       EventTrigger inputEventTrigger, EventTrigger outputEventTrigger,
+	                       Map<String, String> advancedProperties, String inputNamespace) {
+		super(dataService, queryId, queryParams, result, configId, inputEventTrigger,
+		      outputEventTrigger, advancedProperties, inputNamespace);
+
+		this.init(query);
+	}
+
+	/**
+	 * Pre-processing of the query
+	 */
+	protected void init(String query) {
+		this.processNamedParams(query);
+		this.query = createPreparedQueryFromQueryString(query);
+	}
+
+	public List<String> getNamedParamNames() {
+		return namedParamNames;
+	}
+
+	public String getQuery() {
+		return query;
+	}
+
+	/**
+	 * Returns the Query manipulated to suite the given parameters, e.g. adding
+	 * additional "?"'s for array types.
+	 */
+	protected String createProcessedQuery(String query, InternalParamCollection params,
+	                                      int paramCount) {
+		String currentQuery = query;
+		int start = 0;
+		Object[] vals;
+		InternalParam param;
+		ParamValue value;
+		int count;
+		for (int i = 1; i <= paramCount; i++) {
+			param = params.getParam(i);
+			value = param.getValue();
+			/*
+			 * value can be null in stored proc OUT params, so it is simply
+             * treated as a single param, because the number of elements in an
+             * array cannot be calculated, since there's no actual value passed
+             * in
+             */
+			if (value != null && (value.getValueType() == ParamValue.PARAM_VALUE_ARRAY)) {
+				count = (value.getArrayValue()).size();
+			} else {
+				count = 1;
+			}
+			vals = this.expandQuery(start, count, currentQuery);
+			start = (Integer) vals[0];
+			currentQuery = (String) vals[1];
+		}
+		return currentQuery;
+	}
+
+	/**
+	 * Given the starting position, this method searches for the first occurence
+	 * of "?" and replace it with `count` "?"'s. Returns [0] - end position of
+	 * "?"'s, [1] - modified query.
+	 */
+	private Object[] expandQuery(int start, int count, String query) {
+		StringBuilder result = new StringBuilder();
+		int n = query.length();
+		int end = n;
+		for (int i = start; i < n; i++) {
+			if (query.charAt(i) == '?') {
+				result.append(query.substring(0, i));
+				result.append(this.generateQuestionMarks(count));
+				end = result.length() + 1;
+				if (i + 1 < n) {
+					result.append(query.substring(i + 1));
+				}
+				break;
+			}
+		}
+		return new Object[] { end, result.toString() };
+	}
+
+	private String generateQuestionMarks(int n) {
+		StringBuilder builder = new StringBuilder();
+		for (int i = 0; i < n; i++) {
+			builder.append("?");
+			if (i + 1 < n) {
+				builder.append(",");
+			}
+		}
+		return builder.toString();
+	}
+
+	/**
+	 * Modifies the SQL to include the direct value of the parameters of type
+	 * "QUERY_STRING"; The SQL will be recreated and the other parameters will
+	 * be re-organized to point to correct ordinal values.
+	 *
+	 * @return [0] The updated SQL, [1] The updated parameter count
+	 */
+	protected Object[] processDynamicQuery(String query, InternalParamCollection params,
+	                                       int paramCount) {
+		Integer[] paramIndices = this.extractQueryParamIndices(query);
+		int currentOrdinalDiff = 0;
+		int currentParamIndexDiff = 0;
+		InternalParam tmpParam;
+		int paramIndex;
+		String tmpValue;
+		int resultParamCount = paramCount;
+		for (int i = 1; i <= paramCount; i++) {
+			tmpParam = params.getParam(i);
+			if (DBConstants.DataTypes.QUERY_STRING.equals(tmpParam.getSqlType())) {
+				paramIndex = paramIndices[i - 1] + currentParamIndexDiff;
+				tmpValue = params.getParam(i).getValue().getScalarValue();
+				currentParamIndexDiff += tmpValue.length() - 1;
+				if (paramIndex + 1 < query.length()) {
+					query = query.substring(0, paramIndex) + tmpValue +
+					        query.substring(paramIndex + 1);
+				} else {
+					query = query.substring(0, paramIndex) + tmpValue;
+				}
+				params.remove(i);
+				currentOrdinalDiff++;
+				resultParamCount--;
+			} else {
+				params.remove(i);
+				tmpParam.setOrdinal(i - currentOrdinalDiff);
+				params.addParam(tmpParam);
+			}
+		}
+		return new Object[] { query, resultParamCount };
+	}
+
+	private Integer[] extractQueryParamIndices(String sql) {
+		List<Integer> result = new ArrayList<Integer>();
+		char[] data = sql.toCharArray();
+		for (int i = 0; i < data.length; i++) {
+			if (data[i] == '?') {
+				result.add(i);
+			}
+		}
+		return result.toArray(new Integer[result.size()]);
+	}
+
+	private void sortStringsByLength(List<String> values) {
+		Collections.sort(values, new Comparator<String>() {
+			@Override public int compare(String lhs, String rhs) {
+				return lhs.length() - rhs.length();
+			}
+		});
+	}
+
+	private String createPreparedQueryFromQueryString(String query) {
+	    /* get a copy of the param names */
+		List<String> values = new ArrayList<String>(this.getNamedParamNames());
+		/* sort the strings */
+		this.sortStringsByLength(values);
+	    /*
+         * make it from largest to smallest, this is done to make sure, if there
+         * are params like, :abcd,:abc, then the step of replacing :abc doesn't
+         * also initially replace :abcd's substring as well
+         */
+		Collections.reverse(values);
+		for (String val : values) {
+            /* replace named params with ?'s */
+			query = query.replaceAll(":" + val, "?");
+		}
+		return query;
+	}
+
+	private List<String> extractParamNames(String query, Set<String> queryParams) {
+		List<String> paramNames = new ArrayList<String>();
+		String tmpParam;
+		for (int i = 0; i < query.length(); i++) {
+			if (query.charAt(i) == '?') {
+				paramNames.add("?");
+			} else if (query.charAt(i) == ':') {
+                /* check if the string is at the end */
+				if (i + 1 < query.length()) {
+                    /*
+                     * split params in situations like ":a,:b", ":a :b", ":a:b",
+                     * "(:a,:b)"
+                     */
+					tmpParam = query.substring(i + 1, query.length()).split(" |,|\\)|\\(|:")[0];
+					if (queryParams.contains(tmpParam)) {
+                        /*
+                         * only consider this as a parameter if it's in input
+                         * mappings
+                         */
+						paramNames.add(tmpParam);
+					}
+				}
+			}
+		}
+		return paramNames;
+	}
+
+	private void processNamedParams(String query) {
+		Map<String, QueryParam> paramMap = new HashMap<String, QueryParam>();
+		for (QueryParam param : this.getQueryParams()) {
+			paramMap.put(param.getName(), param);
+		}
+		List<String> paramNames = this.extractParamNames(query, paramMap.keySet());
+		this.namedParamNames = new ArrayList<String>();
+		QueryParam tmpParam;
+		String tmpParamName;
+		int tmpOrdinal;
+		Set<String> checkedQueryParams = new HashSet<String>();
+		Set<Integer> processedOrdinalsForNamedParams = new HashSet<Integer>();
+		for (int i = 0; i < paramNames.size(); i++) {
+			if (!paramNames.get(i).equals("?")) {
+				tmpParamName = paramNames.get(i);
+				tmpParam = paramMap.get(tmpParamName);
+				if (tmpParam != null) {
+					if (!checkedQueryParams.contains(tmpParamName)) {
+						tmpParam.clearOrdinals();
+						checkedQueryParams.add(tmpParamName);
+					}
+					this.namedParamNames.add(tmpParamName);
+                    /* ordinals of named params */
+					tmpOrdinal = i + 1;
+					tmpParam.addOrdinal(tmpOrdinal);
+					processedOrdinalsForNamedParams.add(tmpOrdinal);
+				}
+			}
+		}
+		this.cleanupProcessedNamedParams(checkedQueryParams, processedOrdinalsForNamedParams,
+		                                 paramMap);
+	}
+
+	/**
+	 * This method is used to clean up the ordinal in the named paramter
+	 * scenario, where the SQL may not have all the params as named parameters,
+	 * so other non-named parameters ordinals may clash with the processed one.
+	 */
+	private void cleanupProcessedNamedParams(Set<String> checkedQueryParams,
+	                                         Set<Integer> processedOrdinalsForNamedParams,
+	                                         Map<String, QueryParam> paramMap) {
+		QueryParam tmpQueryParam;
+		for (String paramName : paramMap.keySet()) {
+			if (!checkedQueryParams.contains(paramName)) {
+				tmpQueryParam = paramMap.get(paramName);
+                /* unchecked query param can only have one ordinal */
+				if (processedOrdinalsForNamedParams.contains(tmpQueryParam.getOrdinal())) {
+                    /* set to a value that will not clash with valid ordinals */
+					tmpQueryParam.setOrdinal(0);
+				}
+			}
+		}
+	}
+
+	protected int calculateParamCount(String query) {
+		int n = 0;
+		for (char ch : query.toCharArray()) {
+			if (ch == '?') {
+				n++;
+			}
+		}
+		return n;
+	}
+
+}

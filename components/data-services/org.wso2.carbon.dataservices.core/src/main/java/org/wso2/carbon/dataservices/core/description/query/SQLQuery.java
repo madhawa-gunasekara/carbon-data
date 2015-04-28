@@ -51,7 +51,7 @@ import java.util.*;
 /**
  * This class represents an SQL query in a data service.
  */
-public class SQLQuery extends Query implements BatchRequestParticipant {
+public class SQLQuery extends QueryExpression implements BatchRequestParticipant {
 
     private static final Log log = LogFactory.getLog(SQLQuery.class);
 
@@ -73,13 +73,9 @@ public class SQLQuery extends Query implements BatchRequestParticipant {
 
     private boolean resultOnlyOutParams;
 
-    private List<String> namedParamNames;
-
     private boolean hasRefCursor;
 
     private String sql;
-
-    private int paramCount;
 
     private int optimalRSFetchSize;
 
@@ -135,11 +131,11 @@ public class SQLQuery extends Query implements BatchRequestParticipant {
             List<QueryParam> queryParams, Result result, EventTrigger inputEventTrigger,
             EventTrigger outputEventTrigger, Map<String, String> advancedProperties,
             String inputNamespace) throws DataServiceFault {
-        super(dataService, queryId, queryParams, result, configId, inputEventTrigger,
+        super(dataService, queryId, query, queryParams, result, configId, inputEventTrigger,
                 outputEventTrigger, advancedProperties, inputNamespace);
         this.returnGeneratedKeys = returnGeneratedKeys;
         this.keyColumns = keyColumns;
-        this.query = query;
+
         try {
             this.config = (SQLConfig) this.getDataService().getConfig(this.getConfigId());
         } catch (ClassCastException e) {
@@ -157,7 +153,7 @@ public class SQLQuery extends Query implements BatchRequestParticipant {
         currentRefCursorOrdinal.set(ordinal);
     }
 
-    public void init() throws DataServiceFault {
+    private void init() throws DataServiceFault {
         /* process the advanced/additional properties */
         this.processAdvancedProps(this.getAdvancedProperties());
         this.queryType = this.retrieveQueryType(this.getQuery());
@@ -663,14 +659,6 @@ public class SQLQuery extends Query implements BatchRequestParticipant {
 
     public List<QueryParam> getOutQueryParams() {
         return outQueryParams;
-    }
-
-    public String getQuery() {
-        return query;
-    }
-
-    public void setQuery(String query) {
-        this.query = query;
     }
 
     public int getQueryType() {
@@ -1360,27 +1348,6 @@ public class SQLQuery extends Query implements BatchRequestParticipant {
         } catch (Exception e) {
             throw new SQLException(e.getMessage());
         }
-    }
-
-    private Integer[] extractSQLParamIndices(String sql) {
-        List<Integer> result = new ArrayList<Integer>();
-        char[] data = sql.toCharArray();
-        for (int i = 0; i < data.length; i++) {
-            if (data[i] == '?') {
-                result.add(i);
-            }
-        }
-        return result.toArray(new Integer[result.size()]);
-    }
-
-    private int calculateParamCount(String sql) {
-        int n = 0;
-        for (char ch : sql.toCharArray()) {
-            if (ch == '?') {
-                n++;
-            }
-        }
-        return n;
     }
 
     private PreparedStatement createProcessedPreparedStatement(int queryType,
