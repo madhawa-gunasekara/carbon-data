@@ -1375,45 +1375,6 @@ public class SQLQuery extends Query implements BatchRequestParticipant {
     }
 
     /**
-     * Modifies the SQL to include the direct value of the parameters of type
-     * "QUERY_STRING"; The SQL will be recreated and the other parameters will
-     * be re-organized to point to correct ordinal values.
-     * 
-     * @return [0] The updated SQL, [1] The updated parameter count
-     */
-    private Object[] processDynamicQuery(String sql, InternalParamCollection params,
-            int paramCount) {
-        Integer[] paramIndices = this.extractSQLParamIndices(sql);
-        int currentOrdinalDiff = 0;
-        int currentParamIndexDiff = 0;
-        InternalParam tmpParam;
-        int paramIndex;
-        String tmpValue;
-        int resultParamCount = paramCount;
-        for (int i = 1; i <= paramCount; i++) {
-            tmpParam = params.getParam(i);
-            if (DataTypes.QUERY_STRING.equals(tmpParam.getSqlType())) {
-                paramIndex = paramIndices[i - 1] + currentParamIndexDiff;
-                tmpValue = params.getParam(i).getValue().getScalarValue();
-                currentParamIndexDiff += tmpValue.length() - 1;
-                if (paramIndex + 1 < sql.length()) {
-                    sql = sql.substring(0, paramIndex) + tmpValue + sql.substring(paramIndex + 1);
-                } else {
-                    sql = sql.substring(0, paramIndex) + tmpValue;
-                }
-                params.remove(i);
-                currentOrdinalDiff++;
-                resultParamCount--;
-            } else {
-                params.remove(i);
-                tmpParam.setOrdinal(i - currentOrdinalDiff);
-                params.addParam(tmpParam);
-            }
-        }
-        return new Object[] { sql, resultParamCount };
-    }
-
-    /**
      * Returns the SQL manipulated to suite the given parameters, e.g. adding
      * additional "?"'s for array types.
      */
