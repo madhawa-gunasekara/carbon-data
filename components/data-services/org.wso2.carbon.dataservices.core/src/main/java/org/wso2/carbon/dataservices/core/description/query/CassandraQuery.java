@@ -26,6 +26,7 @@ import com.datastax.driver.core.PreparedStatement;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Row;
 import com.datastax.driver.core.Session;
+import com.datastax.driver.core.SimpleStatement;
 import org.apache.axis2.databinding.utils.ConverterUtil;
 import org.apache.commons.codec.binary.Base64;
 import org.wso2.carbon.dataservices.common.DBConstants;
@@ -252,7 +253,19 @@ public class CassandraQuery extends Query {
             String dynamicCql = (String) result[0];
             int currentParamCount = (Integer) result[1];
             String processedSQL = this.createProcessedQuery(dynamicCql, params, currentParamCount);
-            rs = this.getSession().execute(processedSQL);
+            if (DispatchStatus.isBatchRequest() && this.isNativeBatchRequestsSupported()) {
+            /* handle batch requests */
+                if (DispatchStatus.isFirstBatchRequest()) {
+                    this.batchStatement.set(new BatchStatement());
+                }
+                SimpleStatement simpleStatement = new SimpleStatement(processedSQL);
+                this.batchStatement.get().add(simpleStatement);
+                if (DispatchStatus.isLastBatchRequest()) {
+                    this.getSession().execute(this.batchStatement.get());
+                }
+            } else {
+                rs = this.getSession().execute(processedSQL);
+            }
         } else {
             this.checkAndCreateStatement();
             if (DispatchStatus.isBatchRequest() && this.isNativeBatchRequestsSupported()) {
