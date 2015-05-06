@@ -25,7 +25,6 @@ import org.apache.commons.logging.LogFactory;
 import org.wso2.carbon.dataservices.common.DBConstants;
 import org.wso2.carbon.dataservices.common.DBConstants.AdvancedSQLProps;
 import org.wso2.carbon.dataservices.common.DBConstants.AutoCommit;
-import org.wso2.carbon.dataservices.common.DBConstants.DataTypes;
 import org.wso2.carbon.dataservices.common.DBConstants.FaultCodes;
 import org.wso2.carbon.dataservices.common.DBConstants.QueryTypes;
 import org.wso2.carbon.dataservices.common.DBConstants.RDBMS;
@@ -38,21 +37,53 @@ import org.wso2.carbon.dataservices.core.description.event.EventTrigger;
 import org.wso2.carbon.dataservices.core.dispatch.BatchDataServiceRequest;
 import org.wso2.carbon.dataservices.core.dispatch.BatchRequestParticipant;
 import org.wso2.carbon.dataservices.core.dispatch.DispatchStatus;
-import org.wso2.carbon.dataservices.core.engine.*;
+import org.wso2.carbon.dataservices.core.engine.DataEntry;
+import org.wso2.carbon.dataservices.core.engine.DataService;
+import org.wso2.carbon.dataservices.core.engine.InternalParam;
+import org.wso2.carbon.dataservices.core.engine.InternalParamCollection;
+import org.wso2.carbon.dataservices.core.engine.ParamValue;
+import org.wso2.carbon.dataservices.core.engine.QueryParam;
+import org.wso2.carbon.dataservices.core.engine.Result;
+import org.wso2.carbon.dataservices.core.engine.ResultSetWrapper;
 
 import javax.xml.stream.XMLStreamWriter;
-
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.Reader;
+import java.io.StringReader;
 import java.math.BigDecimal;
-import java.sql.*;
+import java.sql.Array;
+import java.sql.Blob;
+import java.sql.CallableStatement;
+import java.sql.Clob;
+import java.sql.Connection;
+import java.sql.DatabaseMetaData;
 import java.sql.Date;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
+import java.sql.SQLFeatureNotSupportedException;
+import java.sql.Statement;
+import java.sql.Struct;
+import java.sql.Time;
+import java.sql.Timestamp;
+import java.sql.Types;
 import java.text.ParseException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
 
 /**
  * This class represents an SQL query in a data service.
  */
-public class SQLQuery extends Query implements BatchRequestParticipant {
+public class SQLQuery extends ExpressionQuery implements BatchRequestParticipant {
 
     private static final Log log = LogFactory.getLog(SQLQuery.class);
 
@@ -61,8 +92,6 @@ public class SQLQuery extends Query implements BatchRequestParticipant {
     public static final int DS_QUERY_TYPE_STORED_PROC = 0x02;
 
     public static final int ORACLE_REF_CURSOR_TYPE = -10;
-
-    private String query;
 
     private SQLConfig config;
 
@@ -74,11 +103,7 @@ public class SQLQuery extends Query implements BatchRequestParticipant {
 
     private boolean resultOnlyOutParams;
 
-    private List<String> namedParamNames;
-
     private boolean hasRefCursor;
-
-    private String sql;
 
     private int paramCount;
 
@@ -136,18 +161,17 @@ public class SQLQuery extends Query implements BatchRequestParticipant {
             List<QueryParam> queryParams, Result result, EventTrigger inputEventTrigger,
             EventTrigger outputEventTrigger, Map<String, String> advancedProperties,
             String inputNamespace) throws DataServiceFault {
-        super(dataService, queryId, queryParams, result, configId, inputEventTrigger,
-                outputEventTrigger, advancedProperties, inputNamespace);
+        super(dataService, queryId, queryParams, query, result, configId, inputEventTrigger,
+              outputEventTrigger, advancedProperties, inputNamespace);
         this.returnGeneratedKeys = returnGeneratedKeys;
         this.keyColumns = keyColumns;
-        this.query = query;
         try {
             this.config = (SQLConfig) this.getDataService().getConfig(this.getConfigId());
         } catch (ClassCastException e) {
             throw new DataServiceFault(e, "Configuration is not an SQL config:"
                     + this.getConfigId());
         }
-        this.init();
+        this.init(query);
     }
 
     public static int getCurrentRefCursorOrdinal() {
@@ -158,15 +182,15 @@ public class SQLQuery extends Query implements BatchRequestParticipant {
         currentRefCursorOrdinal.set(ordinal);
     }
 
-    public void init() throws DataServiceFault {
+    @Override
+    public void init(String query) throws DataServiceFault {
+        super.init(query);
         /* process the advanced/additional properties */
         this.processAdvancedProps(this.getAdvancedProperties());
         this.queryType = this.retrieveQueryType(this.getQuery());
-        this.processNamedParams();
         this.outQueryParams = this.extractOutQueryParams(this.getQueryParams());
         /* re-format sql query with named params */
-        this.sql = this.createSqlFromQueryString(this.getQuery());
-        this.paramCount = this.calculateParamCount(this.getSql());
+        this.paramCount = this.calculateParamCount(this.getQuery());
         /* check for existence of any ref cursors */
         this.checkRefCursor(this.getQueryParams());
         /* check for existence of any SQL Arrays */
@@ -208,7 +232,7 @@ public class SQLQuery extends Query implements BatchRequestParticipant {
      * @return The stored procedure name
      */
     private String extractStoredProcName(boolean skipFirstWord) {
-        String sql = this.getSql();
+        String sql = this.getQuery();
         String[] tokens = removeSpaces(sql.split("\\s|\\(|\\["));
         if (skipFirstWord) {
             if (tokens.length < 2) {
@@ -475,10 +499,6 @@ public class SQLQuery extends Query implements BatchRequestParticipant {
         }
     }
 
-    public List<String> getNamedParamNames() {
-        return namedParamNames;
-    }
-
     public boolean isHasFetchDirection() {
         return hasFetchDirection;
     }
@@ -541,108 +561,6 @@ public class SQLQuery extends Query implements BatchRequestParticipant {
         });
     }
 
-    private String createSqlFromQueryString(String query) {
-        /* get a copy of the param names */
-        List<String> values = new ArrayList<String>(this.getNamedParamNames());
-        /* sort the strings */
-        this.sortStringsByLength(values);
-        /*
-         * make it from largest to smallest, this is done to make sure, if there
-         * are params like, :abcd,:abc, then the step of replacing :abc doesn't
-         * also initially replace :abcd's substring as well
-         */
-        Collections.reverse(values);
-        for (String val : values) {
-            /* replace named params with ?'s */
-            query = query.replaceAll(":" + val, "?");
-        }
-        return query;
-    }
-
-    public String getSql() {
-        return sql;
-    }
-
-    private List<String> extractParamNames(String query, Set<String> queryParams) {
-        List<String> paramNames = new ArrayList<String>();
-        String tmpParam;
-        for (int i = 0; i < query.length(); i++) {
-            if (query.charAt(i) == '?') {
-                paramNames.add("?");
-            } else if (query.charAt(i) == ':') {
-                /* check if the string is at the end */
-                if (i + 1 < query.length()) {
-                    /*
-                     * split params in situations like ":a,:b", ":a :b", ":a:b",
-                     * "(:a,:b)"
-                     */
-                    tmpParam = query.substring(i + 1, query.length()).split(" |,|\\)|\\(|:")[0];
-                    if (queryParams.contains(tmpParam)) {
-                        /*
-                         * only consider this as a parameter if it's in input
-                         * mappings
-                         */
-                        paramNames.add(tmpParam);
-                    }
-                }
-            }
-        }
-        return paramNames;
-    }
-
-    private void processNamedParams() {
-        Map<String, QueryParam> paramMap = new HashMap<String, QueryParam>();
-        for (QueryParam param : this.getQueryParams()) {
-            paramMap.put(param.getName(), param);
-        }
-        List<String> paramNames = this.extractParamNames(this.getQuery(), paramMap.keySet());
-        this.namedParamNames = new ArrayList<String>();
-        QueryParam tmpParam;
-        String tmpParamName;
-        int tmpOrdinal;
-        Set<String> checkedQueryParams = new HashSet<String>();
-        Set<Integer> processedOrdinalsForNamedParams = new HashSet<Integer>();
-        for (int i = 0; i < paramNames.size(); i++) {
-            if (!paramNames.get(i).equals("?")) {
-                tmpParamName = paramNames.get(i);
-                tmpParam = paramMap.get(tmpParamName);
-                if (tmpParam != null) {
-                    if (!checkedQueryParams.contains(tmpParamName)) {
-                        tmpParam.clearOrdinals();
-                        checkedQueryParams.add(tmpParamName);
-                    }
-                    this.namedParamNames.add(tmpParamName);
-                    /* ordinals of named params */
-                    tmpOrdinal = i + 1;
-                    tmpParam.addOrdinal(tmpOrdinal);
-                    processedOrdinalsForNamedParams.add(tmpOrdinal);
-                }
-            }
-        }
-        this.cleanupProcessedNamedParams(checkedQueryParams, processedOrdinalsForNamedParams,
-                paramMap);
-    }
-
-    /**
-     * This method is used to clean up the ordinal in the named paramter
-     * scenario, where the SQL may not have all the params as named parameters,
-     * so other non-named parameters ordinals may clash with the processed one.
-     */
-    private void cleanupProcessedNamedParams(Set<String> checkedQueryParams,
-            Set<Integer> processedOrdinalsForNamedParams, Map<String, QueryParam> paramMap) {
-        QueryParam tmpQueryParam;
-        for (String paramName : paramMap.keySet()) {
-            if (!checkedQueryParams.contains(paramName)) {
-                tmpQueryParam = paramMap.get(paramName);
-                /* unchecked query param can only have one ordinal */
-                if (processedOrdinalsForNamedParams.contains(tmpQueryParam.getOrdinal())) {
-                    /* set to a value that will not clash with valid ordinals */
-                    tmpQueryParam.setOrdinal(0);
-                }
-            }
-        }
-    }
-
     public boolean hasOutParams() {
         return hasOutParams;
     }
@@ -664,14 +582,6 @@ public class SQLQuery extends Query implements BatchRequestParticipant {
 
     public List<QueryParam> getOutQueryParams() {
         return outQueryParams;
-    }
-
-    public String getQuery() {
-        return query;
-    }
-
-    public void setQuery(String query) {
-        this.query = query;
     }
 
     public int getQueryType() {
@@ -1378,7 +1288,7 @@ public class SQLQuery extends Query implements BatchRequestParticipant {
      * Returns the SQL manipulated to suite the given parameters, e.g. adding
      * additional "?"'s for array types.
      */
-    public String createProcessedSql(String sql, InternalParamCollection params, int paramCount) {
+    private String createProcessedSql(String sql, InternalParamCollection params, int paramCount) {
         String currentSql = sql;
         int start = 0;
         Object[] vals;
@@ -1399,55 +1309,11 @@ public class SQLQuery extends Query implements BatchRequestParticipant {
             } else {
                 count = 1;
             }
-            vals = this.expandSQL(start, count, currentSql);
+            vals = this.expandQuery(start, count, currentSql);
             start = (Integer) vals[0];
             currentSql = (String) vals[1];
         }
         return currentSql;
-    }
-
-    /**
-     * Given the starting position, this method searches for the first occurence
-     * of "?" and replace it with `count` "?"'s. Returns [0] - end position of
-     * "?"'s, [1] - modified sql.
-     */
-    private Object[] expandSQL(int start, int count, String sql) {
-        StringBuilder result = new StringBuilder();
-        int n = sql.length();
-        int end = n;
-        for (int i = start; i < n; i++) {
-            if (sql.charAt(i) == '?') {
-                result.append(sql.substring(0, i));
-                result.append(this.generateQuestionMarks(count));
-                end = result.length() + 1;
-                if (i + 1 < n) {
-                    result.append(sql.substring(i + 1));
-                }
-                break;
-            }
-        }
-        return new Object[] { end, result.toString() };
-    }
-
-    private String generateQuestionMarks(int n) {
-        StringBuilder builder = new StringBuilder();
-        for (int i = 0; i < n; i++) {
-            builder.append("?");
-            if (i + 1 < n) {
-                builder.append(",");
-            }
-        }
-        return builder.toString();
-    }
-
-    private int calculateParamCount(String sql) {
-        int n = 0;
-        for (char ch : sql.toCharArray()) {
-            if (ch == '?') {
-                n++;
-            }
-        }
-        return n;
     }
 
     private PreparedStatement createProcessedPreparedStatement(int queryType,
@@ -1464,7 +1330,7 @@ public class SQLQuery extends Query implements BatchRequestParticipant {
             /* create a new prepared statement */
             if (stmt == null) {
                 /* batch mode is not supported for dynamic queries */
-                Object[] result = this.processDynamicQuery(this.getSql(), params,
+                Object[] result = this.processDynamicQuery(this.getQuery(), params,
                         this.getParamCount());
                 String dynamicSQL = (String) result[0];
                 currentParamCount = (Integer) result[1];
