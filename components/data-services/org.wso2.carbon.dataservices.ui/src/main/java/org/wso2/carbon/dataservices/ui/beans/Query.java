@@ -426,7 +426,7 @@ public class Query extends DataServiceConfigurationElement {
 		if (this.isReturnGeneratedKeys() == true) {
 			queryEl.addAttribute("returnGeneratedKeys", String.valueOf(this.isReturnGeneratedKeys()), null);
 		}
-		if (this.isReturnUpdatedRowCount() == true) {
+		if (true == this.isReturnUpdatedRowCount()) {
 			queryEl.addAttribute("returnUpdatedRowCount", String.valueOf(this.isReturnUpdatedRowCount()), null);
 		}
 		if (this.getKeyColumns() != null && this.getKeyColumns().trim().length() > 0) {

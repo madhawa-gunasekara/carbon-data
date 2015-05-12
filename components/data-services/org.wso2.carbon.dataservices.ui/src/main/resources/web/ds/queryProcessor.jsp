@@ -87,7 +87,7 @@
     edit = (edit == null) ? "" : edit;
     outputType = (outputType == null) ? "xml" : outputType;
     returnGeneratedKeys = (returnGeneratedKeys == null) ? "false" : "true";
-    returnUpdatedRowCount = (returnUpdatedRowCount == null) ? "false" : "true";
+    returnUpdatedRowCount = (null == returnUpdatedRowCount) ? "false" : "true";
     useColumnNumbers = (useColumnNumbers == null) ? "false" : "true";
     escapeNonPrintableChar = (escapeNonPrintableChar == null) ? "false" : "true";
     xsltPath = (xsltPath == null) ? "":xsltPath;
@@ -517,7 +517,7 @@
             }
         }
     } 
-    /* check return row id change */
+    /* check return row id change - GeneratedKeys */
     if (setReturnGeneratedKeys != null) {
     	boolean hasReturnRowProperty = false;
     	String eleName ="";
@@ -565,19 +565,19 @@
         }
     }
 
-    /* check return row id change */
-    if (setReturnUpdatedRowCount != null) {
+    /* check return row id change - ReturnUpdatedRowCount */
+    if (null != setReturnUpdatedRowCount) {
         boolean hasReturnRowProperty = false;
         String eleName ="";
-        if (setReturnUpdatedRowCount.equals("true")) {
-           if(dataService.getQuery(queryId) != null) {
+        if (("true").equals(setReturnUpdatedRowCount)) {
+           if(null != dataService.getQuery(queryId)) {
               Query returnRowQuery = dataService.getQuery(queryId);
               Result res = returnRowQuery.getResult();
-              if (returnUpdatedRowCount.equals("true") && (!hasReturnRowProperty)) {
+              if (("true").equals(returnUpdatedRowCount) && (!hasReturnRowProperty)) {
                   returnRowQuery.setReturnUpdatedRowCount(true);
-                  if (res == null || res.getElements().size() == 0) {
+                  if (null == res || res.getElements().size() == 0) {
                       res = new Result();
-                      res.setResultWrapper("GeneratedKeys");
+                      res.setResultWrapper("UpdatedRowCount");
                       res.setRowName("Entry");
                       res.setUseColumnNumbers("true");
                       res.setEscapeNonPrintableChar(escapeNonPrintableChar);
@@ -591,16 +591,16 @@
                   res.addElement(newElement);
               }
            }
-        } else if (setReturnUpdatedRowCount.equals("false")) {
-            if (dataService.getQuery(queryId) != null) {
+        } else if (("false").equals(setReturnUpdatedRowCount)) {
+            if (null != dataService.getQuery(queryId)) {
                 Query returnRowQuery = dataService.getQuery(queryId);
                 Result res = returnRowQuery.getResult();
-                if (returnUpdatedRowCount.equals("false")) {
+                if (("false").equals(returnUpdatedRowCount)) {
                     returnRowQuery.setReturnUpdatedRowCount(false);
-                    if (res != null) {
+                    if (null != res) {
                         res.removeElement("COUNT");
                         //remove result wrapper only if there are no other result elements exist other than generated key
-                        if (res.getElements() != null && res.getElements().size() == 0) {
+                        if (null != res.getElements() && 0 == res.getElements().size()) {
                             res.setResultWrapper("");
                             res.setRowName("");
                             res.setUseColumnNumbers("false");
