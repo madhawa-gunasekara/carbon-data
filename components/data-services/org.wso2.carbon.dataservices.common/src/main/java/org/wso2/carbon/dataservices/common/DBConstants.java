@@ -759,6 +759,7 @@ public final class DBConstants {
         public static final String POLICY_KEY = "key";
         public static final String ENABLESEC = "enableSec";
         public static final String CONFIG = "config";
+        public static final String ENABLE_ODATA = "enableODataService";
         public static final String QUERY = "query";
         public static final String OPERATION = "operation";
         public static final String RESOURCE = "resource";

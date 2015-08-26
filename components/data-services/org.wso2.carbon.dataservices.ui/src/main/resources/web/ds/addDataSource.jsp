@@ -181,6 +181,7 @@ private boolean isFieldMandatory(String propertName) {
 	}
 }
 
+Boolean isODataBool = false;
 private Config addNotAvailableFunctions(Config config,String selectedType, HttpServletRequest request) {
     String xaVal = request.getParameter ("xaVal");
 	if (DBConstants.DataSourceTypes.RDBMS.equals(selectedType)) {
@@ -195,6 +196,11 @@ private Config addNotAvailableFunctions(Config config,String selectedType, HttpS
 		 }
 		 if (config.getPropertyValue(DBConstants.RDBMS.PASSWORD) == null) {
 			 config.addProperty(DBConstants.RDBMS.PASSWORD, "");
+		 }
+	 	 if (config.isExposeAsODataService() == true) {
+			 isODataBool = true;
+		 } else {
+		 	isODataBool = false;
 		 }
             if (config.getPropertyValue(DBConstants.RDBMS.DATASOURCE_CLASSNAME) == null) {
                 config.addProperty(DBConstants.RDBMS.DATASOURCE_CLASSNAME, "");
@@ -402,6 +408,11 @@ private Config addNotAvailableFunctions(Config config,String selectedType, HttpS
         if (config.getPropertyValue(DBConstants.Cassandra.KEYSPACE) == null) {
             config.addProperty(DBConstants.Cassandra.KEYSPACE, "");
         }
+		if (config.isExposeAsODataService() == true) {
+			isODataBool = true;
+		} else {
+			isODataBool = false;
+		}
         if (config.getPropertyValue(DBConstants.Cassandra.PORT) == null) {
             config.addProperty(DBConstants.Cassandra.PORT, "");
         }
@@ -689,8 +700,8 @@ private String getSheetName(String gSpreadJDBCUrl) {
                     newConfig.addProperty(DBConstants.RDBMS.URL, "");
                     newConfig.addProperty(DBConstants.RDBMS.USERNAME, "");
                     newConfig.addProperty(DBConstants.RDBMS.PASSWORD, "");
-                        newConfig.addProperty(DBConstants.RDBMS.DATASOURCE_CLASSNAME, "");
-
+					newConfig.addProperty(DBConstants.RDBMS.DATASOURCE_CLASSNAME, "");
+					newConfig.setExposeAsOData(false);
                         ArrayList<Property> property = new ArrayList<Property>();
                         //property.add(new Property("URL", ""));
                         //property.add(new Property("User", ""));
@@ -2334,6 +2345,15 @@ private String getSheetName(String gSpreadJDBCUrl) {
     }
     }
 %>
+<% if("RDBMS".equals(dataSourceType) || "Cassandra".equals(dataSourceType)) { %>
+<tr>
+    <td class="leftCol-small" style="white-space: nowrap;">
+        Expose As OData Service</td>
+    <td>
+        <input type="checkbox" name="isOData" id="isOData" value="isOData" <%=(isODataBool==true ? "checked" : "") %>>
+    </td>
+</tr>
+<% } %>
 </table>
 
 <% if (DBConstants.DataSourceTypes.RDBMS.equals(selectedType)) { %>
