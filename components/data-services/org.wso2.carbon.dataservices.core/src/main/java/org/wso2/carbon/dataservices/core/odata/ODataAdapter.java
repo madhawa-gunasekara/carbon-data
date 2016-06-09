@@ -411,7 +411,7 @@ public class ODataAdapter implements ServiceHandler {
     }
 
     @Override
-    public void updateEntity(DataRequest request, Entity changes, boolean merge, String eTag, EntityResponse response)
+    public void updateEntity(DataRequest request, Entity changes, boolean merge, String entityETag, EntityResponse response)
             throws ODataApplicationException {
         List<UriParameter> keys = request.getKeyPredicates();
         EdmEntityType entityType = request.getEntitySet().getEntityType();
@@ -419,7 +419,7 @@ public class ODataAdapter implements ServiceHandler {
 		/*checking for the E-Tag option, If E-Tag didn't specify in the request we don't need to check the E-Tag checksum,
 		we can do the update operation directly */
         try {
-            if (EMPTY_E_TAG.equals(eTag)) {
+            if (EMPTY_E_TAG.equals(entityETag)) {
                 updateEntity(entityType, changes, keys, merge);
                 response.writeUpdatedEntity();
             } else {
@@ -438,7 +438,7 @@ public class ODataAdapter implements ServiceHandler {
                         log.debug(message);
                     }
                 } else {
-                    entity = getETagMatchedEntity(eTag, getIfMatch(request), entity);
+                    entity = getETagMatchedEntity(entityETag, getIfMatch(request), entity);
                     if (entity != null) {
                         boolean result = updateEntityWithETagMatched(entityType, changes, entity, merge);
                         if (result) {
@@ -453,18 +453,16 @@ public class ODataAdapter implements ServiceHandler {
                     }
                 }
             }
-        } catch (DataServiceFault e) {
-            response.writeNotModified();
-            log.error("Error occurred while updating entity. :" + e.getMessage(), e);
-        } finally {
-            if (!EMPTY_E_TAG.equals(eTag)) {
-                try {
-                    finalizeTransactionalConnection();
-                } catch (DataServiceFault e) {
-                    response.writeNotModified();
-                    log.error("Error occurred while updating entity. :" + e.getMessage(), e);
-                }
+            if (!EMPTY_E_TAG.equals(entityETag)) {
+                finalizeTransactionalByCommittingConnection();
             }
+        } catch (DataServiceFault e) {
+            if (!EMPTY_E_TAG.equals(entityETag)) {
+                finalizeTransactionalByRollingBackConnection();
+            }
+            response.writeNotModified();
+            String error = "Error occurred while updating entity. :" + e.getMessage();
+            throw new ODataApplicationException(error, 500, Locale.ENGLISH);
         }
     }
 
@@ -483,12 +481,13 @@ public class ODataAdapter implements ServiceHandler {
             }
         } catch (ODataServiceFault e) {
             response.writeNotModified();
-            log.error("Error occurred while upserting entity. :" + e.getMessage(), e);
+            String error = "Error occurred while upserting entity. :" + e.getMessage();
+            throw new ODataApplicationException(error, 500, Locale.ENGLISH);
         }
     }
 
     @Override
-    public void deleteEntity(DataRequest request, String eTag, EntityResponse response)
+    public void deleteEntity(DataRequest request, String entityETag, EntityResponse response)
             throws ODataApplicationException {
         List<UriParameter> keys = request.getKeyPredicates();
         EdmEntityType entityType = request.getEntitySet().getEntityType();
@@ -497,7 +496,7 @@ public class ODataAdapter implements ServiceHandler {
 		we can do the update operation directly */
         try {
             ODataEntry deleteEntity = wrapKeyParamToDataEntry(keys);
-            if (!EMPTY_E_TAG.equals(eTag)) {
+            if (!EMPTY_E_TAG.equals(entityETag)) {
                 initializeTransactionalConnection();
                 Entity entity = getEntity(request.getEntitySet().getEntityType(), keys, baseUrl);
                 if (entity == null) {
@@ -511,13 +510,15 @@ public class ODataAdapter implements ServiceHandler {
                         message.append(".");
                         log.debug(message);
                     }
+                    finalizeTransactionalByCommittingConnection();
                     return;
                 } else {
-                    entity = getETagMatchedEntity(eTag, getIfMatch(request), entity);
+                    entity = getETagMatchedEntity(entityETag, getIfMatch(request), entity);
                     if (entity == null) {
                         response.writeError(
                                 new ODataServerError().setStatusCode(HttpStatusCode.PRECONDITION_FAILED.getStatusCode())
                                                       .setMessage("E-Tag checksum didn't match."));
+                        finalizeTransactionalByCommittingConnection();
                         return;
                     } else {
                         deleteEntity = wrapEntityToDataEntry(entityType, entity);
@@ -528,24 +529,22 @@ public class ODataAdapter implements ServiceHandler {
             if (result) {
                 response.writeDeletedEntityOrReference();
             } else {
-                if (!EMPTY_E_TAG.equals(eTag)) {
+                if (!EMPTY_E_TAG.equals(entityETag)) {
                     response.writeNotModified();
                 } else {
                     response.writeNotFound(true);
                 }
             }
-        } catch (DataServiceFault e) {
-            response.writeNotModified();
-            log.error("Error occurred while deleting entity. :" + e.getMessage(), e);
-        } finally {
-            if (!EMPTY_E_TAG.equals(eTag)) {
-                try {
-                    finalizeTransactionalConnection();
-                } catch (DataServiceFault e) {
-                    response.writeNotModified();
-                    log.error("Error occurred while deleting entity. :" + e.getMessage(), e);
-                }
+            if (!EMPTY_E_TAG.equals(entityETag)) {
+                finalizeTransactionalByCommittingConnection();
             }
+        } catch (DataServiceFault e) {
+            if (!EMPTY_E_TAG.equals(entityETag)) {
+                finalizeTransactionalByRollingBackConnection();
+            }
+            response.writeNotModified();
+            String error = "Error occurred while deleting entity. :" + e.getMessage();
+            throw new ODataApplicationException(error, 500, Locale.ENGLISH);
         }
     }
 
@@ -618,18 +617,16 @@ public class ODataAdapter implements ServiceHandler {
                         }
                     }
                 }
-            } catch (DataServiceFault e) {
-                response.writeNotModified();
-                log.error("Error occurred while updating property. :" + e.getMessage(), e);
-            } finally {
                 if (!EMPTY_E_TAG.equals(entityETag)) {
-                    try {
-                        finalizeTransactionalConnection();
-                    } catch (DataServiceFault e) {
-                        response.writeNotModified();
-                        log.error("Error occurred while updating property. :" + e.getMessage(), e);
-                    }
+                    finalizeTransactionalByCommittingConnection();
                 }
+            } catch (DataServiceFault e) {
+                if (!EMPTY_E_TAG.equals(entityETag)) {
+                    finalizeTransactionalByRollingBackConnection();
+                }
+                response.writeNotModified();
+                String error = "Error occurred while updating property. :" + e.getMessage();
+                throw new ODataApplicationException(error, 500, Locale.ENGLISH);
             }
         } else {
             response.writeNotModified();
@@ -640,7 +637,7 @@ public class ODataAdapter implements ServiceHandler {
     }
 
 
-    public void updateProperty(DataRequest request, final Property property, boolean merge, String entityETag,
+/*    public void updateProperty(DataRequest request, final Property property, boolean merge, String entityETag,
                                PropertyResponse response) throws ODataApplicationException, ContentNegotiatorException {
         if (!property.isComplex()) {
             EdmEntityType entityType = request.getEntitySet().getEntityType();
@@ -657,8 +654,8 @@ public class ODataAdapter implements ServiceHandler {
             entry.addValue(property.getName(),
                            readPrimitiveValueInString(entityType.getStructuralProperty(property.getName()),
                                                       property.getValue()));
-		/*checking for the E-Tag option, If E-Tag didn't specify in the request we don't need to check the E-Tag checksum,
-		we can do the update operation directly */
+		*//*checking for the E-Tag option, If E-Tag didn't specify in the request we don't need to check the E-Tag checksum,
+		we can do the update operation directly *//*
             try {
                 if (EMPTY_E_TAG.equals(entityETag)) {
                     this.dataHandler.updateEntityInTable(entityType.getName(), entry);
@@ -707,7 +704,7 @@ public class ODataAdapter implements ServiceHandler {
             } finally {
                 if (!EMPTY_E_TAG.equals(entityETag)) {
                     try {
-                        finalizeTransactionalConnection();
+                        finalizeTransactionalByCommittingConnection();
                     } catch (DataServiceFault e) {
                         response.writeNotModified();
                         log.error("Error occurred while updating property. :" + e.getMessage(), e);
@@ -720,7 +717,7 @@ public class ODataAdapter implements ServiceHandler {
                 log.debug("Only Primitive type properties are allowed to update.");
             }
         }
-    }
+    }*/
 
     @Override
     public <T extends ServiceResponse> void invoke(FunctionRequest request, HttpMethod method, T response)
@@ -884,6 +881,7 @@ public class ODataAdapter implements ServiceHandler {
                         message.append(".");
                         log.debug(message);
                     }
+                    finalizeTransactionalByCommittingConnection();
                     return;
                 } else {
                     entity = getETagMatchedEntity(entityETag, getIfMatch(request), entity);
@@ -892,6 +890,7 @@ public class ODataAdapter implements ServiceHandler {
                         if (log.isDebugEnabled()) {
                             log.debug("Entity didn't match for the E-Tag checksum. " + entityETag);
                         }
+                        finalizeTransactionalByCommittingConnection();
                         return;
                     }
                 }
@@ -899,18 +898,16 @@ public class ODataAdapter implements ServiceHandler {
             this.dataHandler.updateReference(rootTable, wrapKeyParamToDataEntry(rootKeys), navigationTable,
                                              navigationKeys);
             response.writeNoContent();
-        } catch (ODataServiceFault e) {
-            response.writeNotModified();
-            log.error("Error occurred while updating the reference. :" + e.getMessage(), e);
-        } finally {
             if (!EMPTY_E_TAG.equals(entityETag)) {
-                try {
-                    finalizeTransactionalConnection();
-                } catch (ODataServiceFault e) {
-                    response.writeNotModified();
-                    log.error("Error occurred while updating the reference. :" + e.getMessage(), e);
-                }
+                finalizeTransactionalByCommittingConnection();
             }
+        } catch (ODataServiceFault e) {
+            if (!EMPTY_E_TAG.equals(entityETag)) {
+                finalizeTransactionalByRollingBackConnection();
+            }
+            response.writeNotModified();
+            String error = "Error occurred while updating the reference. :" + e.getMessage();
+            throw new ODataApplicationException(error, 500, Locale.ENGLISH);
         }
     }
 
@@ -944,6 +941,7 @@ public class ODataAdapter implements ServiceHandler {
                         message.append(".");
                         log.debug(message);
                     }
+                    finalizeTransactionalByCommittingConnection();
                     return;
                 } else {
                     entity = getETagMatchedEntity(entityETag, getIfMatch(request), entity);
@@ -952,6 +950,7 @@ public class ODataAdapter implements ServiceHandler {
                         if (log.isDebugEnabled()) {
                             log.debug("Entity didn't match for the E-Tag checksum. " + entityETag);
                         }
+                        finalizeTransactionalByCommittingConnection();
                         return;
                     }
                 }
@@ -960,18 +959,16 @@ public class ODataAdapter implements ServiceHandler {
             this.dataHandler.deleteReference(rootTable, wrapKeyParamToDataEntry(rootKeys), navigationTable,
                                              navigationKeys);
             response.writeNoContent();
-        } catch (ODataServiceFault e) {
-            response.writeNotModified();
-            log.error("Error occurred while deleting the reference. :" + e.getMessage(), e);
-        } finally {
             if (!EMPTY_E_TAG.equals(entityETag)) {
-                try {
-                    finalizeTransactionalConnection();
-                } catch (ODataServiceFault e) {
-                    response.writeNotModified();
-                    log.error("Error occurred while deleting the reference. :" + e.getMessage(), e);
-                }
+                finalizeTransactionalByCommittingConnection();
             }
+        } catch (ODataServiceFault e) {
+            if (!EMPTY_E_TAG.equals(entityETag)) {
+                finalizeTransactionalByRollingBackConnection();
+            }
+            response.writeNotModified();
+            String error = "Error occurred while deleting the reference. :" + e.getMessage();
+            throw new ODataApplicationException(error, 500, Locale.ENGLISH);
         }
     }
 
@@ -1021,7 +1018,7 @@ public class ODataAdapter implements ServiceHandler {
 
     @Override
     public boolean supportsDataIsolation() {
-        return false;
+        return true;
     }
 
     @Override
@@ -1066,10 +1063,7 @@ public class ODataAdapter implements ServiceHandler {
             return entitySet;
         } catch (URISyntaxException e) {
             throw new ODataServiceFault(e, "Error occurred when creating id for the entity. :" + e.getMessage());
-        } catch (ParseException e) {
-            throw new ODataServiceFault(e, "Error occurred when creating a property for the entity. :" +
-                                           e.getMessage());
-        } catch (EdmPrimitiveTypeException e) {
+        } catch (ParseException | EdmPrimitiveTypeException e) {
             throw new ODataServiceFault(e, "Error occurred when creating a property for the entity. :" +
                                            e.getMessage());
         }
@@ -1111,13 +1105,15 @@ public class ODataAdapter implements ServiceHandler {
                 }
             }
             entity.setETag(eTag);
+            if (!entity.getNavigationBindings().isEmpty()) {
+                finalizeTransactionalByCommittingConnection();
+            }
             return entity;
         } catch (ODataServiceFault | ODataApplicationException e) {
-            throw new ODataServiceFault(e.getMessage());
-        } finally {
             if (!entity.getNavigationBindings().isEmpty()) {
-                finalizeTransactionalConnection();
+                finalizeTransactionalByRollingBackConnection();
             }
+            throw new ODataServiceFault(e.getMessage());
         }
     }
 
@@ -1982,9 +1978,19 @@ public class ODataAdapter implements ServiceHandler {
         }
     }
 
-    private void finalizeTransactionalConnection() throws ODataServiceFault {
+    private void finalizeTransactionalByCommittingConnection() throws ODataServiceFault {
         if (!batchRequest.get()) {
             this.dataHandler.commitTransaction();
+        }
+    }
+
+    private void finalizeTransactionalByRollingBackConnection() {
+        try {
+            if (!batchRequest.get()) {
+                this.dataHandler.rollbackTransaction();
+            }
+        } catch (ODataServiceFault oDataServiceFault) {
+            log.error(oDataServiceFault.getMessage());
         }
     }
 }

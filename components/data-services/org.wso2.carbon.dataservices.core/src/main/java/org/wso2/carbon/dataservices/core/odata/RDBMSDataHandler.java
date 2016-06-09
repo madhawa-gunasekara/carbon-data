@@ -147,9 +147,10 @@ public class RDBMSDataHandler implements ODataDataHandler {
         /* close the connection */
             try {
                 connection.close();
-                transactionalConnection.set(null);
             } catch (Exception ignore) {
                 // ignore
+            } finally {
+                transactionalConnection.set(null);
             }
         }
     }
@@ -171,9 +172,10 @@ public class RDBMSDataHandler implements ODataDataHandler {
 		/* close the connection */
             try {
                 connection.close();
-                transactionalConnection.set(null);
             } catch (Exception ignore) {
                 // ignore
+            } finally {
+                transactionalConnection.set(null);
             }
         }
     }
