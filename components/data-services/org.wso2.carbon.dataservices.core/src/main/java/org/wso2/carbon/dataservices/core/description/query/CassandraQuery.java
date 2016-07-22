@@ -328,11 +328,11 @@ public class CassandraQuery extends ExpressionQuery {
             } else if (columnType.getName().equals(DataType.Name.TIMESTAMP)) {
                 paramValue = new ParamValue(row.isNull(i) ? null : ConverterUtil.convertToString(row.getDate(i)));
             } else if (columnType.getName().equals(DataType.Name.TIMEUUID)) {
-                paramValue = new ParamValue(row.getUUID(i).toString());
+                paramValue = new ParamValue(row.isNull(i) ? null : row.getUUID(i).toString());
             } else if (columnType.getName().equals(DataType.Name.UUID)) {
-                paramValue = new ParamValue(row.getUUID(i).toString());
+                paramValue = new ParamValue(row.isNull(i) ? null : row.getUUID(i).toString());
             } else if (columnType.getName().equals(DataType.Name.VARINT)) {
-                paramValue = new ParamValue(row.getVarint(i).toString());
+                paramValue = new ParamValue(row.isNull(i) ? null : row.getVarint(i).toString());
             }
             entry.addValue(useColumnNumbers ? Integer.toString(i) : defs.getName(i), paramValue);
         }
