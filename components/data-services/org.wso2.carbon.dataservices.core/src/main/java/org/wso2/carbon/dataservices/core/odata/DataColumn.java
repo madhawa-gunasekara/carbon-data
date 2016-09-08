@@ -58,17 +58,24 @@ public class DataColumn {
      */
     private String defaultValue;
 
+    private boolean isAutoIncrement;
+
     /**
      * Maximum length of the table column.
      */
     private int maxLength;
 
-    public DataColumn(String columnName, ODataDataType columnType, int order, boolean isNullable, int length) {
+    public DataColumn(String columnName, ODataDataType columnType, int order, boolean isNullable, int length, boolean isAutoIncrement) {
         this.columnName = columnName;
         this.columnType = columnType;
         this.ordinalPosition = order;
         this.nullable = isNullable;
         this.maxLength = length;
+        this.isAutoIncrement = isAutoIncrement;
+    }
+
+    public void setMaxLength(int maxLength) {
+        this.maxLength = maxLength;
     }
 
     public DataColumn(String columnName, ODataDataType columnType, boolean isNullable) {
@@ -156,5 +163,9 @@ public class DataColumn {
 
     public void setDefaultValue(String defaultValue) {
         this.defaultValue = defaultValue;
+    }
+
+    public boolean isAutoIncrement() {
+        return isAutoIncrement;
     }
 }

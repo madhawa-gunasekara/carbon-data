@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
+ * Copyright (c) 2016, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
  *
  * WSO2 Inc. licenses this file to you under the Apache License,
  * Version 2.0 (the "License"); you may not use this file except
@@ -27,6 +27,7 @@ import org.wso2.carbon.dataservices.core.DBUtils;
 import org.wso2.carbon.dataservices.core.DataServiceFault;
 import org.wso2.carbon.dataservices.core.engine.DataEntry;
 import org.wso2.carbon.dataservices.core.odata.DataColumn.ODataDataType;
+import org.wso2.carbon.dataservices.core.odata.expression.ODataConstants;
 
 import javax.sql.DataSource;
 import java.io.BufferedReader;
@@ -87,6 +88,10 @@ public class RDBMSDataHandler implements ODataDataHandler {
      */
     private List<String> tableList;
 
+    public static final String TABLE_NAME = "TABLE_NAME";
+    public static final String TABLE = "TABLE";
+    public static final String ORACLE_SERVER = "oracle";
+
     private ThreadLocal<Connection> transactionalConnection = new ThreadLocal<Connection>() {
         protected synchronized Connection initialValue() {
             return null;
@@ -122,7 +127,12 @@ public class RDBMSDataHandler implements ODataDataHandler {
                 this.defaultAutoCommit = connection.getAutoCommit();
                 connection.setAutoCommit(false);
                 this.defaultTransactionalIsolation = connection.getTransactionIsolation();
-                connection.setTransactionIsolation(Connection.TRANSACTION_REPEATABLE_READ);
+                try {
+                    connection.setTransactionIsolation(Connection.TRANSACTION_REPEATABLE_READ);
+                } catch (SQLException e) {
+                    // Some Databases are not supported REPEATABLE_READ Isolation level.
+                    connection.setTransactionIsolation(Connection.TRANSACTION_SERIALIZABLE);
+                }
                 transactionalConnection.set(connection);
             }
         } catch (SQLException e) {
@@ -363,11 +373,12 @@ public class RDBMSDataHandler implements ODataDataHandler {
     public List<ODataEntry> readTable(String tableName) throws ODataServiceFault {
         ResultSet resultSet = null;
         Connection connection = null;
-        Statement statement = null;
+        PreparedStatement statement = null;
         try {
             connection = initializeConnection();
-            statement = connection.createStatement();
-            resultSet = statement.executeQuery("select * from " + tableName);
+            String query = "select * from " + tableName;
+            statement = connection.prepareStatement(query);
+            resultSet = statement.executeQuery();
             return createDataEntryCollectionFromRS(tableName, resultSet);
         } catch (SQLException e) {
             throw new ODataServiceFault(e, "Error occurred while reading entities from " + tableName + " table. :" +
@@ -401,15 +412,18 @@ public class RDBMSDataHandler implements ODataDataHandler {
     }
 
     @Override
-    public String
-
-    insertEntityToTable(String tableName, ODataEntry entry) throws ODataServiceFault {
+    public ODataEntry insertEntityToTable(String tableName, ODataEntry entry) throws ODataServiceFault {
         Connection connection = null;
         PreparedStatement statement = null;
         try {
             connection = initializeConnection();
             String query = createInsertSQL(tableName, entry);
-            statement = connection.prepareStatement(query);
+            boolean isAvailableAutoIncrementColumns = isAvailableAutoIncrementColumns(tableName);
+            if(isAvailableAutoIncrementColumns) {
+                statement = connection.prepareStatement(query, Statement.RETURN_GENERATED_KEYS);
+            } else {
+                statement = connection.prepareStatement(query);
+            }
             int index = 1;
             for (String column : entry.getNames()) {
                 if (this.rdbmsDataTypes.get(tableName).keySet().contains(column)) {
@@ -419,9 +433,32 @@ public class RDBMSDataHandler implements ODataDataHandler {
                     index++;
                 }
             }
-            statement.execute();
+            ODataEntry createdEntry = new ODataEntry();
+            if (isAvailableAutoIncrementColumns(tableName)) {
+                statement.executeUpdate();
+                ResultSet resultSet = statement.getGeneratedKeys();
+                String paramValue;
+                int i = 1;
+                while (resultSet.next()) {
+                    for (DataColumn column : this.tableMetaData.get(tableName).values()) {
+                        if (column.isAutoIncrement() && !entry.getNames().contains(column.getColumnName())) {
+                            String resultSetColumnName = resultSet.getMetaData().getColumnName(i);
+                            String columnName = column.getColumnName();
+                            int columnType = this.rdbmsDataTypes.get(tableName).get(columnName);
+                            paramValue = getValueFromResultSet(columnType, resultSetColumnName, resultSet);
+                            createdEntry.addValue(columnName, paramValue);
+                            // Need to add this column to generate the E-tag
+                            entry.addValue(columnName, paramValue);
+                        }
+                    }
+                    i++;
+                }
+            } else {
+                statement.execute();
+            }
             commitExecution(connection);
-            return ODataUtils.generateETag(this.configID, tableName, entry);
+            createdEntry.addValue(ODataConstants.E_TAG, ODataUtils.generateETag(this.configID, tableName, entry));
+            return createdEntry;
         } catch (SQLException | ParseException e) {
             throw new ODataServiceFault(e, "Error occurred while writing entities to " + tableName + " table. :" +
                                            e.getMessage());
@@ -429,6 +466,15 @@ public class RDBMSDataHandler implements ODataDataHandler {
             releaseResources(null, statement);
             releaseConnection(connection);
         }
+    }
+
+    private boolean isAvailableAutoIncrementColumns(String table) {
+        for (DataColumn column : this.tableMetaData.get(table).values()) {
+            if (column.isAutoIncrement()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
@@ -975,17 +1021,23 @@ public class RDBMSDataHandler implements ODataDataHandler {
                 int size = resultSet.getInt("COLUMN_SIZE");
                 boolean nullable = resultSet.getBoolean("NULLABLE");
                 String columnDefaultVal = resultSet.getString("COLUMN_DEF");
-                int precision = resultSet.getMetaData().getPrecision(i);
-                int scale = resultSet.getMetaData().getScale(i);
-                DataColumn column = new DataColumn(columnName, getODataDataType(columnType), i, nullable, size);
+                String autoIncrement = resultSet.getString("IS_AUTOINCREMENT").toLowerCase();
+                boolean isAutoIncrement = false;
+                if (autoIncrement.contains("yes") || autoIncrement.contains("true")) {
+                    isAutoIncrement = true;
+                }
+                DataColumn column = new DataColumn(columnName, getODataDataType(columnType), i, nullable, size,
+                                                   isAutoIncrement);
                 if (null != columnDefaultVal) {
                     column.setDefaultValue(columnDefaultVal);
                 }
-                if (Types.DOUBLE == columnType || Types.FLOAT == columnType || Types.DECIMAL == columnType) {
-                    column.setPrecision(precision);
+                if (Types.DOUBLE == columnType || Types.FLOAT == columnType || Types.DECIMAL == columnType ||
+                    Types.NUMERIC == columnType || Types.REAL == columnType) {
+                    int scale = resultSet.getInt("DECIMAL_DIGITS");
+                    column.setPrecision(size);
                     if (scale == 0) {
                         //setting default scale as 5
-                        column.setScale(precision);
+                        column.setScale(size);
                     } else {
                         column.setScale(scale);
                     }
@@ -1042,9 +1094,13 @@ public class RDBMSDataHandler implements ODataDataHandler {
         try {
             connection = initializeConnection();
             DatabaseMetaData meta = connection.getMetaData();
-            rs = meta.getTables(null, null, null, new String[] { "TABLE" });
+            if (meta.getDatabaseProductName().toLowerCase().contains(ORACLE_SERVER)) {
+                rs = meta.getTables(null, meta.getUserName(), null, new String[] { TABLE });
+            } else {
+                rs = meta.getTables(null, null, null, new String[] { TABLE });
+            }
             while (rs.next()) {
-                String tableName = rs.getString("TABLE_NAME");
+                String tableName = rs.getString(TABLE_NAME);
                 tableList.add(tableName);
             }
             return tableList;
@@ -1068,7 +1124,7 @@ public class RDBMSDataHandler implements ODataDataHandler {
         ResultSet resultSet = null;
         List<String> keys = new ArrayList<>();
         try {
-            resultSet = metaData.getPrimaryKeys(catalog, "", tableName);
+            resultSet = metaData.getPrimaryKeys(catalog, null, tableName);
             while (resultSet.next()) {
                 String primaryKey = resultSet.getString("COLUMN_NAME");
                 keys.add(primaryKey);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
+ * Copyright (c) 2016, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
  *
  * WSO2 Inc. licenses this file to you under the Apache License,
  * Version 2.0 (the "License"); you may not use this file except
@@ -107,8 +107,14 @@ public class UntypedOperand extends VisitorOperand {
         if ((newValue = tryCast(literal, ODataConstants.primitiveSingle)) != null) {
             return new TypedOperand(newValue, ODataConstants.primitiveSingle);
         }
+        if ((newValue = tryCast(literal, ODataConstants.primitiveGuid)) != null) {
+            return new TypedOperand(newValue, ODataConstants.primitiveGuid);
+        }
         if ((newValue = tryCast(literal, ODataConstants.primitiveDouble)) != null) {
             return new TypedOperand(newValue, ODataConstants.primitiveDouble);
+        }
+        if ((newValue = tryCast(literal, ODataConstants.primitiveBinary)) != null) {
+            return new TypedOperand(newValue, ODataConstants.primitiveBinary);
         }
         throw new ODataApplicationException("Could not determine type for literal " + literal,
                                             HttpStatusCode.INTERNAL_SERVER_ERROR.getStatusCode(), Locale.ROOT);

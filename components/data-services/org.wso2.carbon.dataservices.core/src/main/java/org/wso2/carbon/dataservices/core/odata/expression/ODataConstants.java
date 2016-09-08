@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
+ * Copyright (c) 2016, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
  *
  * WSO2 Inc. licenses this file to you under the Apache License,
  * Version 2.0 (the "License"); you may not use this file except
@@ -30,28 +30,31 @@ public class ODataConstants {
 
     public static final OData ODATA = OData.newInstance();
 
+    public static final EdmPrimitiveType primitiveBinary =
+            ODATA.createPrimitiveTypeInstance(EdmPrimitiveTypeKind.Binary);
+    public static final EdmPrimitiveType primitiveBoolean =
+            ODATA.createPrimitiveTypeInstance(EdmPrimitiveTypeKind.Boolean);
+    public static final EdmPrimitiveType primitiveByte = ODATA.createPrimitiveTypeInstance(EdmPrimitiveTypeKind.Byte);
+    public static final EdmPrimitiveType primitiveSByte = ODATA.createPrimitiveTypeInstance(EdmPrimitiveTypeKind.SByte);
+    public static final EdmPrimitiveType primitiveDate = ODATA.createPrimitiveTypeInstance(EdmPrimitiveTypeKind.Date);
+    public static final EdmPrimitiveType primitiveDateTimeOffset =
+            ODATA.createPrimitiveTypeInstance(EdmPrimitiveTypeKind.DateTimeOffset);
+    public static final EdmPrimitiveType primitiveTimeOfDay =
+            ODATA.createPrimitiveTypeInstance(EdmPrimitiveTypeKind.TimeOfDay);
     public static final EdmPrimitiveType primitiveDuration =
             ODATA.createPrimitiveTypeInstance(EdmPrimitiveTypeKind.Duration);
-    public static final EdmPrimitiveType primitiveSByte = ODATA.createPrimitiveTypeInstance(EdmPrimitiveTypeKind.SByte);
-    public static final EdmPrimitiveType primitiveByte = ODATA.createPrimitiveTypeInstance(EdmPrimitiveTypeKind.Byte);
-    public static final EdmPrimitiveType primitiveInt16 = ODATA.createPrimitiveTypeInstance(EdmPrimitiveTypeKind.Int16);
-    public static final EdmPrimitiveType primitiveInt64 = ODATA.createPrimitiveTypeInstance(EdmPrimitiveTypeKind.Int64);
+    public static final EdmPrimitiveType primitiveDecimal =
+            ODATA.createPrimitiveTypeInstance(EdmPrimitiveTypeKind.Decimal);
     public static final EdmPrimitiveType primitiveSingle =
             ODATA.createPrimitiveTypeInstance(EdmPrimitiveTypeKind.Single);
     public static final EdmPrimitiveType primitiveDouble =
             ODATA.createPrimitiveTypeInstance(EdmPrimitiveTypeKind.Double);
+    public static final EdmPrimitiveType primitiveGuid = ODATA.createPrimitiveTypeInstance(EdmPrimitiveTypeKind.Guid);
+    public static final EdmPrimitiveType primitiveInt16 = ODATA.createPrimitiveTypeInstance(EdmPrimitiveTypeKind.Int16);
+    public static final EdmPrimitiveType primitiveInt32 = ODATA.createPrimitiveTypeInstance(EdmPrimitiveTypeKind.Int32);
+    public static final EdmPrimitiveType primitiveInt64 = ODATA.createPrimitiveTypeInstance(EdmPrimitiveTypeKind.Int64);
     public static final EdmPrimitiveType primitiveString =
             ODATA.createPrimitiveTypeInstance(EdmPrimitiveTypeKind.String);
-    public static final EdmPrimitiveType primitiveBoolean =
-            ODATA.createPrimitiveTypeInstance(EdmPrimitiveTypeKind.Boolean);
-    public static final EdmPrimitiveType primitiveDateTimeOffset =
-            ODATA.createPrimitiveTypeInstance(EdmPrimitiveTypeKind.DateTimeOffset);
-    public static final EdmPrimitiveType primitiveDate = ODATA.createPrimitiveTypeInstance(EdmPrimitiveTypeKind.Date);
-    public static final EdmPrimitiveType primitiveTimeOfDay =
-            ODATA.createPrimitiveTypeInstance(EdmPrimitiveTypeKind.TimeOfDay);
-    public static final EdmPrimitiveType primitiveInt32 = ODATA.createPrimitiveTypeInstance(EdmPrimitiveTypeKind.Int32);
-    public static final EdmPrimitiveType primitiveDecimal =
-            ODATA.createPrimitiveTypeInstance(EdmPrimitiveTypeKind.Decimal);
     public static final EdmPrimitiveType primitiveNull = EdmNull.getInstance();
 
     public static final int FACTOR_SECOND_INT = 1000;
@@ -72,4 +75,5 @@ public class ODataConstants {
     public static final int EQUALS = 0;
     public static final int LESS_THAN = -1;
     public static final int GREATER_THAN = 1;
+    public static final String E_TAG = "E_TAG";
 }

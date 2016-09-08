@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
+ * Copyright (c) 2016, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
  *
  * WSO2 Inc. licenses this file to you under the Apache License,
  * Version 2.0 (the "License"); you may not use this file except
@@ -91,6 +91,7 @@ import org.apache.olingo.server.core.uri.parser.UriParserException;
 import org.wso2.carbon.dataservices.common.DBConstants;
 import org.wso2.carbon.dataservices.core.DataServiceFault;
 import org.wso2.carbon.dataservices.core.engine.DataEntry;
+import org.wso2.carbon.dataservices.core.odata.expression.ODataConstants;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -105,6 +106,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * This class implements the olingo serviceHandler to process requests and response.
@@ -398,13 +400,14 @@ public class ODataAdapter implements ServiceHandler {
         EdmEntitySet edmEntitySet = request.getEntitySet();
         String baseURL = request.getODataRequest().getRawBaseUri();
         try {
-            entity.setId(new URI(EntityResponse.buildLocation(baseURL, entity, edmEntitySet.getName(),
-                                                              edmEntitySet.getEntityType())));
             Entity created = createEntityInTable(edmEntitySet.getEntityType(), entity);
+            entity.setId(new URI(EntityResponse.buildLocation(baseURL, created, edmEntitySet.getName(),
+                                                              edmEntitySet.getEntityType())));
             response.writeCreatedEntity(edmEntitySet, created);
         } catch (ODataServiceFault | SerializerException | URISyntaxException e) {
             response.writeNotModified();
-            log.error("Error occurred while creating entity. :" + e.getMessage(), e);
+            String error = "Error occurred while creating entity. :" + e.getMessage();
+            throw new ODataApplicationException(error, 500, Locale.ENGLISH);
         }
     }
 
@@ -547,10 +550,100 @@ public class ODataAdapter implements ServiceHandler {
         }
     }
 
-    @Override
+/*    @Override
+    public void updateProperty(DataRequest request, Property property, boolean rawValue, boolean merge,
+                               String entityETag, PropertyResponse response)
+            throws ODataLibraryException, ODataApplicationException {
+        if (rawValue && property.getValue() != null) {
+            // this is more generic, stricter conversion rules must taken in a real service
+            byte[] value = (byte[])property.getValue();
+            property.setValue(ValueType.PRIMITIVE, new String(value));
+        }
+
+        if (!property.isComplex()) {
+            EdmEntityType entityType = request.getEntitySet().getEntityType();
+            String baseUrl = request.getODataRequest().getRawBaseUri();
+            List<UriParameter> keys = request.getKeyPredicates();
+            ODataEntry entry = new ODataEntry();
+            for (UriParameter key : keys) {
+                String value = key.getText();
+                if (value.startsWith("'") && value.endsWith("'")) {
+                    value = value.substring(1, value.length() - 1);
+                }
+                entry.addValue(key.getName(), value);
+            }
+            entry.addValue(property.getName(),
+                           readPrimitiveValueInString(entityType.getStructuralProperty(property.getName()),
+                                                      property.getValue()));
+		*//*checking for the E-Tag option, If E-Tag didn't specify in the request we don't need to check the E-Tag checksum,
+		we can do the update operation directly *//*
+            try {
+                if (EMPTY_E_TAG.equals(entityETag)) {
+                    this.dataHandler.updateEntityInTable(entityType.getName(), entry);
+                    if (property.getValue() == null) {
+                        response.writePropertyDeleted();
+                    } else {
+                        response.writePropertyUpdated();
+                    }
+                } else {
+                    // This should be done in transactional, for the sake of E-Tag
+                    initializeTransactionalConnection();
+                    Entity entity = getEntity(request.getEntitySet().getEntityType(), keys, baseUrl);
+                    if (entity == null) {
+                        response.writeNotFound(true);
+                        if (log.isDebugEnabled()) {
+                            StringBuilder message = new StringBuilder();
+                            message.append("Entity couldn't find , For ");
+                            for (UriParameter parameter : keys) {
+                                message.append(parameter.getName()).append(" = ").append(parameter.getText())
+                                       .append(" ,");
+                            }
+                            message.append(".");
+                            log.debug(message);
+                        }
+                    } else {
+                        entity = getETagMatchedEntity(entityETag, getIfMatch(request), entity);
+                        if (entity != null) {
+                            this.dataHandler.updateEntityInTableTransactional(entityType.getName(),
+                                                                              wrapEntityToDataEntry(entityType, entity),
+                                                                              entry);
+                            if (property.getValue() == null) {
+                                response.writePropertyDeleted();
+                            } else {
+                                response.writePropertyUpdated();
+                            }
+                        } else {
+                            response.writeError(new ODataServerError().setStatusCode(
+                                    HttpStatusCode.PRECONDITION_FAILED.getStatusCode())
+                                                                      .setMessage("E-Tag checksum didn't match."));
+                        }
+                    }
+                }
+            } catch (DataServiceFault e) {
+                response.writeNotModified();
+                log.error("Error occurred while updating property. :" + e.getMessage(), e);
+            } finally {
+                if (!EMPTY_E_TAG.equals(entityETag)) {
+                    try {
+                        finalizeTransactionalConnection();
+                    } catch (DataServiceFault e) {
+                        response.writeNotModified();
+                        log.error("Error occurred while updating property. :" + e.getMessage(), e);
+                    }
+                }
+            }
+        } else {
+            response.writeNotModified();
+            if (log.isDebugEnabled()) {
+                log.debug("Only Primitive type properties are allowed to update.");
+            }
+        }
+    }*/
+
+
     public void updateProperty(DataRequest request, final Property property, boolean merge, String entityETag,
                                PropertyResponse response) throws ODataApplicationException, ContentNegotiatorException {
-        if (property.isPrimitive()) {
+        if (!property.isComplex()) {
             EdmEntityType entityType = request.getEntitySet().getEntityType();
             String baseUrl = request.getODataRequest().getRawBaseUri();
             List<UriParameter> keys = request.getKeyPredicates();
@@ -979,15 +1072,21 @@ public class ODataAdapter implements ServiceHandler {
      * @see #wrapEntityToDataEntry(EdmEntityType, Entity)
      */
     private Entity createEntityInTable(EdmEntityType entityType, Entity entity) throws ODataServiceFault {
-        String eTag;
         try {
             if (!entity.getNavigationBindings().isEmpty()) {
                 initializeTransactionalConnection();
             }
             String rootTable = entityType.getName();
-            eTag = this.dataHandler.insertEntityToTable(rootTable, wrapEntityToDataEntry(entityType, entity));
+            ODataEntry createdEntity = this.dataHandler.insertEntityToTable(rootTable,
+                                                                            wrapEntityToDataEntry(entityType, entity));
+            for(String paramName : createdEntity.getNames()) {
+                if(!paramName.equals(ODataConstants.E_TAG)) {
+                    DataColumn column = this.dataHandler.getTableMetadata().get(rootTable).get(paramName);
+                    entity.addProperty(createPrimitive(column.getColumnType(), paramName, createdEntity.getValue(paramName)));
+                }
+            }
             if (!entity.getNavigationBindings().isEmpty()) {
-                ODataEntry rootKeys = getKeyPredicatesFromReference(entity.getId().toASCIIString(), rootTable);
+                ODataEntry rootKeys = getKeyPredicatesFromEntity(entityType, entity);
                 for (Link reference : entity.getNavigationBindings()) {
                     String navigationTable = reference.getTitle();
                     if (reference.getBindingLinks().isEmpty()) {
@@ -1002,9 +1101,9 @@ public class ODataAdapter implements ServiceHandler {
                     }
                 }
             }
-            entity.setETag(eTag);
+            entity.setETag(createdEntity.getValue(ODataConstants.E_TAG));
             return entity;
-        } catch (ODataServiceFault | ODataApplicationException e) {
+        } catch (ODataServiceFault | ODataApplicationException | ParseException e) {
             throw new ODataServiceFault(e.getMessage());
         } finally {
             if (!entity.getNavigationBindings().isEmpty()) {
@@ -1032,14 +1131,13 @@ public class ODataAdapter implements ServiceHandler {
     /**
      * This method wraps list of properties into single DataEntry object.
      *
-     * @param entityType    Entity type
      * @param propertyTypes Map od Property Types
      * @param properties    list of properties
      * @return DataEntry
      * @see DataEntry
      * @see Property
      */
-    private ODataEntry wrapPropertiesToDataEntry(EdmEntityType entityType, List<Property> properties,
+    private ODataEntry wrapPropertiesToDataEntry(List<Property> properties,
                                                  Map<String, EdmProperty> propertyTypes)
             throws ODataApplicationException {
         ODataEntry entry = new ODataEntry();
@@ -1048,6 +1146,16 @@ public class ODataAdapter implements ServiceHandler {
             entry.addValue(property.getName(), readPrimitiveValueInString(propertyType, property.getValue()));
         }
         return entry;
+    }
+
+    private ODataEntry getKeyPredicatesFromEntity(EdmEntityType entityType, Entity entity)
+            throws ODataApplicationException {
+        ODataEntry keyPredicates = new ODataEntry();
+        for (String key : entityType.getKeyPredicateNames()) {
+            EdmProperty propertyType = (EdmProperty) entityType.getProperty(key);
+            keyPredicates.addValue(key, readPrimitiveValueInString(propertyType, entity.getProperty(key).getValue()));
+        }
+        return keyPredicates;
     }
 
     /**
@@ -1135,7 +1243,7 @@ public class ODataAdapter implements ServiceHandler {
             newProperties.addValue(property, readPrimitiveValueInString(propertyType, updateProperty.getValue()));
         }
         return this.dataHandler.updateEntityInTableTransactional(edmEntityType.getName(),
-                                                                 wrapPropertiesToDataEntry(edmEntityType, oldProperties,
+                                                                 wrapPropertiesToDataEntry(oldProperties,
                                                                                            propertyMap), newProperties);
     }
 
@@ -1371,7 +1479,7 @@ public class ODataAdapter implements ServiceHandler {
             }
         }
         results = createEntityCollectionFromDataEntryList(linkName, dataHandler
-                .readTableWithKeys(linkName, wrapPropertiesToDataEntry(type, properties, propertyMap)), url);
+                .readTableWithKeys(linkName, wrapPropertiesToDataEntry(properties, propertyMap)), url);
         return results;
 
     }
@@ -1407,7 +1515,7 @@ public class ODataAdapter implements ServiceHandler {
         }
         EntityCollection results;
         results = createEntityCollectionFromDataEntryList(linkName, dataHandler
-                .readTableWithKeys(linkName, wrapPropertiesToDataEntry(type, properties, propertyMap)), baseUrl);
+                .readTableWithKeys(linkName, wrapPropertiesToDataEntry(properties, propertyMap)), baseUrl);
         if (!results.getEntities().isEmpty()) {
             return results.getEntities().get(0);
         } else {
@@ -1447,11 +1555,15 @@ public class ODataAdapter implements ServiceHandler {
                     property.setType(EdmPrimitiveTypeKind.Int32.getFullQualifiedName());
                     property.setNullable(column.isNullable());
                     property.setMaxLength(column.getMaxLength());
+                    property.setScale(column.getScale());
+                    property.setPrecision(column.getPrecision());
                     break;
                 case INT16:
                     property.setType(EdmPrimitiveTypeKind.Int16.getFullQualifiedName());
                     property.setNullable(column.isNullable());
                     property.setMaxLength(column.getMaxLength());
+                    property.setScale(column.getScale());
+                    property.setPrecision(column.getPrecision());
                     break;
                 case DOUBLE:
                     property.setType(EdmPrimitiveTypeKind.Double.getFullQualifiedName());
@@ -1478,21 +1590,26 @@ public class ODataAdapter implements ServiceHandler {
                     property.setType(EdmPrimitiveTypeKind.Byte.getFullQualifiedName());
                     property.setNullable(column.isNullable());
                     property.setMaxLength(column.getMaxLength());
+                    property.setScale(column.getScale());
+                    property.setPrecision(column.getPrecision());
                     break;
                 case SBYTE:
                     property.setType(EdmPrimitiveTypeKind.SByte.getFullQualifiedName());
                     property.setNullable(column.isNullable());
                     property.setMaxLength(column.getMaxLength());
+                    property.setPrecision(column.getPrecision());
                     break;
                 case DATE:
                     property.setType(EdmPrimitiveTypeKind.Date.getFullQualifiedName());
                     property.setNullable(column.isNullable());
                     property.setMaxLength(column.getMaxLength());
+                    property.setPrecision(column.getPrecision());
                     break;
                 case DURATION:
                     property.setType(EdmPrimitiveTypeKind.Duration.getFullQualifiedName());
                     property.setNullable(column.isNullable());
                     property.setMaxLength(column.getMaxLength());
+                    property.setPrecision(column.getPrecision());
                     break;
                 case DECIMAL:
                     property.setType(EdmPrimitiveTypeKind.Decimal.getFullQualifiedName());
@@ -1512,16 +1629,19 @@ public class ODataAdapter implements ServiceHandler {
                     property.setType(EdmPrimitiveTypeKind.TimeOfDay.getFullQualifiedName());
                     property.setNullable(column.isNullable());
                     property.setMaxLength(column.getMaxLength());
+                    property.setPrecision(column.getPrecision());
                     break;
                 case INT64:
                     property.setType(EdmPrimitiveTypeKind.Int64.getFullQualifiedName());
                     property.setNullable(column.isNullable());
                     property.setMaxLength(column.getMaxLength());
+                    property.setPrecision(column.getPrecision());
                     break;
                 case DATE_TIMEOFFSET:
                     property.setType(EdmPrimitiveTypeKind.DateTimeOffset.getFullQualifiedName());
                     property.setNullable(column.isNullable());
                     property.setMaxLength(column.getMaxLength());
+                    property.setPrecision(column.getPrecision());
                     break;
                 case GUID:
                     property.setType(EdmPrimitiveTypeKind.Guid.getFullQualifiedName());
@@ -1719,7 +1839,7 @@ public class ODataAdapter implements ServiceHandler {
                 break;
             case GUID:
                 propertyType = EdmPrimitiveTypeKind.Guid.getFullQualifiedName().getFullQualifiedNameAsString();
-                value = paramValue;
+                value = UUID.fromString(paramValue);
                 break;
             case STREAM:
                 propertyType = EdmPrimitiveTypeKind.Stream.getFullQualifiedName().getFullQualifiedNameAsString();

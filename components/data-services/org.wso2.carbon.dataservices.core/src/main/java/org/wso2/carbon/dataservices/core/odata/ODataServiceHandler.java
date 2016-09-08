@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
+ * Copyright (c) 2016, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
  *
  * WSO2 Inc. licenses this file to you under the Apache License,
  * Version 2.0 (the "License"); you may not use this file except
@@ -23,7 +23,6 @@ import org.apache.olingo.server.api.ODataHttpHandler;
 import org.apache.olingo.server.api.ServiceMetadata;
 import org.apache.olingo.server.api.edmx.EdmxReference;
 import org.apache.olingo.server.core.OData4Impl;
-import org.wso2.carbon.dataservices.core.DataServiceFault;
 
 import javax.servlet.AsyncContext;
 import javax.servlet.DispatcherType;
@@ -74,6 +73,10 @@ public class ODataServiceHandler {
      * @param serviceRootPath Service root Path
      */
     public void process(HttpServletRequest req, HttpServletResponse resp, String serviceRootPath) {
+        /*
+            Security Comment :
+            Modifying only servlet path in the request.
+         */
         handler.process(modifyServletPath(req, serviceRootPath), resp);
     }
 
@@ -104,17 +107,44 @@ public class ODataServiceHandler {
 
             @Override
             public String getHeader(String s) {
-                return req.getHeader(s);
+                if ("accept".equalsIgnoreCase(s)) {
+                    req.getHeader(s).equalsIgnoreCase("application/json;odata.metadata=full");
+                    return "application/json";
+                } else if ("prefer".equalsIgnoreCase(s) && "post".equalsIgnoreCase(req.getMethod())) {
+                    return "return=representation";
+                } else {
+                    return req.getHeader(s);
+                }
             }
 
             @Override
             public Enumeration<String> getHeaders(String s) {
-                return req.getHeaders(s);
+                if ("accept".equalsIgnoreCase(s)) {
+                    if(req.getHeader(s).equalsIgnoreCase("application/json;odata.metadata=full")) {
+                        CustomEnumeration<String> enumeration = new CustomEnumeration<>();
+                        enumeration.addValues("application/json");
+                        return enumeration;
+                    } else {
+                        return req.getHeaders(s);
+                    }
+                } else if ("prefer".equalsIgnoreCase(s) && "post".equalsIgnoreCase(req.getMethod())  && req.getHeader("accept").equalsIgnoreCase("application/json;odata.metadata=full")) {
+                    CustomEnumeration<String> enumeration = new CustomEnumeration<>();
+                    enumeration.addValues("return=representation");
+                    return enumeration;
+                } else {
+                    return req.getHeaders(s);
+                }
             }
 
             @Override
             public Enumeration<String> getHeaderNames() {
-                return req.getHeaderNames();
+                if("post".equalsIgnoreCase(req.getMethod()) && req.getHeader("accept").equalsIgnoreCase("application/json;odata.metadata=full")) {
+                    CustomEnumeration<String> headerNames = new CustomEnumeration<>(req.getHeaderNames());
+                    headerNames.addValues("prefer");
+                    return headerNames;
+                } else {
+                    return req.getHeaderNames();
+                }
             }
 
             @Override
