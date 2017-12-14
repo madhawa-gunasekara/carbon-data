@@ -792,7 +792,12 @@ public class SQLQuery extends ExpressionQuery implements BatchRequestParticipant
                 rs = stmt.executeQuery();
             }
             return new QueryResultInfo(stmt, rs);
-        } catch (Throwable e) {
+        } catch (NumberFormatException e) {
+            isError = true;
+            throw new DataServiceFault(e, FaultCodes.INCOMPATIBLE_PARAMETERS_ERROR,
+                    "Error in 'SQLQuery.processPreNormalQuery': " + e.getMessage());
+        }
+        catch (Throwable e) {
             isError = true;
             throw new DataServiceFault(e, FaultCodes.DATABASE_ERROR,
                     "Error in 'SQLQuery.processPreNormalQuery': " + e.getMessage());
